@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "QuickSlash",
+  "description": "Fast local snippets you can drop into any input by typing ///.",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "QuickSlash",
+    "default_popup": "popup/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["scripts/content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

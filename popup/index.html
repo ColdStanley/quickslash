@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuickSlash</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="qs-app">
+      <header class="qs-header">
+        <div class="qs-title">
+          <h1>QuickSlash</h1>
+          <p>Store reusable Name/Value pairs for fast /// insertion.</p>
+        </div>
+      </header>
+
+      <form id="snippet-form" class="qs-form">
+        <label class="qs-field">
+          <span>Name</span>
+          <input id="nameInput" name="name" type="text" autocomplete="off" required maxlength="80" placeholder="Snippet name" />
+        </label>
+
+        <label class="qs-field">
+          <span>Value</span>
+          <textarea id="valueInput" name="value" rows="4" required placeholder="Text to insert"></textarea>
+        </label>
+
+        <div class="qs-form-footer">
+          <p id="formMessage" aria-live="polite"></p>
+          <button type="submit">Save snippet</button>
+        </div>
+      </form>
+
+      <section class="qs-list">
+        <h2>Saved snippets</h2>
+        <p id="emptyState">No snippets yet. Add your first one above.</p>
+        <ul id="snippetList" aria-live="polite"></ul>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
