@@ -6,8 +6,14 @@ const valueInput = document.getElementById('valueInput');
 const formMessage = document.getElementById('formMessage');
 const snippetList = document.getElementById('snippetList');
 const emptyState = document.getElementById('emptyState');
+const settingsButton = document.getElementById('settingsButton');
+const settingsMenu = document.getElementById('settingsMenu');
+const exportButton = document.getElementById('exportButton');
+const importButton = document.getElementById('importButton');
+const importInput = document.getElementById('importInput');
 
 let snippets = [];
+let settingsOpen = false;
 
 init();
 
@@ -19,6 +25,11 @@ function init() {
 
   form.addEventListener('submit', handleSubmit);
   snippetList.addEventListener('click', handleListClick);
+  settingsButton.addEventListener('click', toggleSettings);
+  exportButton.addEventListener('click', handleExport);
+  importButton.addEventListener('click', () => importInput.click());
+  importInput.addEventListener('change', handleImport);
+  document.addEventListener('mousedown', handleDocumentClick, true);
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes[STORAGE_KEY]) {
@@ -142,4 +153,83 @@ function sortSnippets(list) {
 
 function setMessage(message) {
   formMessage.textContent = message;
+}
+
+function toggleSettings() {
+  settingsOpen = !settingsOpen;
+  settingsButton.setAttribute('aria-expanded', String(settingsOpen));
+  settingsMenu.hidden = !settingsOpen;
+}
+
+function closeSettings() {
+  settingsOpen = false;
+  settingsButton.setAttribute('aria-expanded', 'false');
+  settingsMenu.hidden = true;
+}
+
+function handleDocumentClick(event) {
+  if (!settingsOpen) return;
+  const target = event.target;
+  if (target === settingsButton || settingsButton.contains(target)) return;
+  if (settingsMenu.contains(target)) return;
+  closeSettings();
+}
+
+function handleExport() {
+  if (!snippets.length) {
+    setMessage('No snippets to export.');
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    snippets
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'quickslash-snippets.json';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  setMessage('Exported snippets.');
+  closeSettings();
+}
+
+async function handleImport(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const imported = Array.isArray(data?.snippets) ? data.snippets : Array.isArray(data) ? data : [];
+    if (!Array.isArray(imported) || !imported.length) {
+      setMessage('Invalid file.');
+      return;
+    }
+    const normalizedMap = new Map();
+    for (const item of imported) {
+      if (!item || typeof item.name !== 'string' || typeof item.value !== 'string') continue;
+      const trimmedName = item.name.trim();
+      if (!trimmedName) continue;
+      normalizedMap.set(trimmedName, item.value);
+    }
+    if (!normalizedMap.size) {
+      setMessage('Nothing to import.');
+      return;
+    }
+    const next = sortSnippets(
+      Array.from(normalizedMap.entries()).map(([name, value]) => ({ name, value }))
+    );
+    await persist(next);
+    snippets = next;
+    renderList();
+    setMessage('Imported snippets.');
+    closeSettings();
+  } catch (error) {
+    console.error(error);
+    setMessage('Failed to import.');
+  }
 }

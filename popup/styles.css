@@ -11,7 +11,7 @@
 body {
   margin: 0;
   padding: 0;
-  background: #f8fafc;
+  background: radial-gradient(circle at top, #ffffff, #f3f6fb);
   min-width: 320px;
 }
 
@@ -19,12 +19,19 @@ body {
   padding: 20px 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .qs-header h1 {
-  margin: 0 0 4px;
+  margin: 0 0 2px;
   font-size: 20px;
+}
+
+.qs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .qs-header p {
@@ -33,11 +40,67 @@ body {
   font-size: 13px;
 }
 
+.qs-actions {
+  position: relative;
+}
+
+.qs-gear {
+  border: none;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.15);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.qs-gear:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 30px rgba(15, 23, 42, 0.18);
+}
+
+.qs-settings {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  min-width: 160px;
+  border-radius: 18px;
+  background: #fcfcff;
+  box-shadow: 0 25px 45px rgba(15, 23, 42, 0.18);
+  z-index: 10;
+}
+
+.qs-settings button {
+  border: none;
+  background: #eef0f5;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #111111;
+  text-align: left;
+  transition: background 0.2s ease;
+}
+
+.qs-settings button:hover {
+  background: #e4e7f0;
+}
+
+.qs-form,
+.qs-list {
+  background: #fcfcff;
+  border-radius: 24px;
+  padding: 18px;
+  box-shadow: 0 25px 45px rgba(15, 23, 42, 0.12), 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
 .qs-form {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -46,28 +109,29 @@ body {
 .qs-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   font-size: 13px;
   color: #334155;
 }
 
 .qs-field input,
 .qs-field textarea {
-  border: 1px solid #cbd5f5;
-  border-radius: 8px;
-  padding: 8px 10px;
+  border: none;
+  border-radius: 18px;
+  padding: 10px 14px;
   font-size: 14px;
   font-family: inherit;
   resize: vertical;
   min-height: 36px;
   background: #fdfdff;
+  box-shadow: inset 4px 4px 8px rgba(15, 23, 42, 0.08), inset -4px -4px 10px rgba(255, 255, 255, 0.9);
+  transition: box-shadow 0.2s ease;
 }
 
 .qs-field input:focus,
 .qs-field textarea:focus {
-  border-color: #6366f1;
-  outline: 2px solid rgba(99, 102, 241, 0.35);
-  outline-offset: 0;
+  outline: none;
+  box-shadow: inset 2px 2px 5px rgba(15, 23, 42, 0.1), inset -2px -2px 5px rgba(255, 255, 255, 0.9), 0 0 0 2px rgba(17, 17, 17, 0.08);
 }
 
 .qs-form-footer {
@@ -85,31 +149,27 @@ body {
 }
 
 .qs-form button {
-  background: #2563eb;
+  background: #111111;
   color: #fff;
   border: none;
   border-radius: 999px;
-  padding: 8px 16px;
+  padding: 9px 18px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 18px 30px rgba(17, 17, 17, 0.22);
 }
 
 .qs-form button:hover {
-  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 25px 40px rgba(17, 17, 17, 0.25);
 }
 
 .qs-form button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
-}
-
-.qs-list {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
 }
 
 .qs-list h2 {
@@ -129,17 +189,23 @@ body {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .snippet-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: 18px;
+  padding: 12px 14px;
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  background: #fdfdff;
+  background: #fcfcff;
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.snippet-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.12);
 }
 
 .snippet-card strong {
@@ -158,13 +224,17 @@ body {
 
 .snippet-card button {
   border: none;
-  background: transparent;
+  background: rgba(239, 68, 68, 0.12);
   color: #ef4444;
   font-weight: 600;
   cursor: pointer;
+  border-radius: 999px;
+  padding: 4px 10px;
   align-self: flex-start;
+  box-shadow: inset 1px 1px 2px rgba(255, 255, 255, 0.7);
 }
 
 .snippet-card button:hover {
+  background: rgba(239, 68, 68, 0.18);
   color: #b91c1c;
 }

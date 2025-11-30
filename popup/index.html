@@ -13,6 +13,16 @@
           <h1>QuickSlash</h1>
           <p>Store reusable Name/Value pairs for fast /// insertion.</p>
         </div>
+        <div class="qs-actions">
+          <button id="settingsButton" class="qs-gear" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
+            ⚙
+          </button>
+          <div id="settingsMenu" class="qs-settings" hidden>
+            <button id="exportButton" type="button">Export JSON</button>
+            <button id="importButton" type="button">Import JSON</button>
+          </div>
+          <input id="importInput" type="file" accept="application/json" hidden />
+        </div>
       </header>
 
       <form id="snippet-form" class="qs-form">
