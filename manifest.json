@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "QuickSlash",
   "description": "Fast local snippets you can drop into any input by typing ///.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "permissions": [
     "storage",
     "sidePanel",

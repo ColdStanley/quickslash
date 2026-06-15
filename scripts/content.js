@@ -1,24 +1,27 @@
 (() => {
-  const STORAGE_KEY = 'quickSlashSnippets';
+  const SNIPPETS_KEY = 'quickSlashSnippets';
+  const GROUPS_KEY = 'quickSlashGroups';
   const TRIGGER = '///';
   const TRIGGER_LENGTH = TRIGGER.length;
 
   const state = {
     snippets: [],
+    groups: [],
     context: null
   };
 
   const panel = createPanel(handlePanelSelection);
 
-  loadSnippets();
+  loadData();
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && changes[STORAGE_KEY]) {
-      state.snippets = changes[STORAGE_KEY].newValue || [];
+    if (area === 'local' && (changes[SNIPPETS_KEY] || changes[GROUPS_KEY])) {
+      loadData(() => {
       if (!state.snippets.length) {
         hidePanel();
       } else if (panel.isOpen) {
-        panel.render(state.snippets);
+          panel.render(state.snippets, state.groups);
       }
+      });
     }
   });
 
@@ -119,10 +122,31 @@
     scheduleReposition();
   }
 
-  function loadSnippets() {
-    chrome.storage.local.get({ [STORAGE_KEY]: [] }, (result) => {
-      state.snippets = result[STORAGE_KEY] || [];
+  function loadData(callback) {
+    chrome.storage.local.get({ [SNIPPETS_KEY]: [], [GROUPS_KEY]: [] }, (result) => {
+      state.groups = normalizeGroups(result[GROUPS_KEY]);
+      const validGroupIds = new Set(state.groups.map((group) => group.id));
+      state.snippets = normalizeSnippets(result[SNIPPETS_KEY], validGroupIds);
+      callback?.();
     });
+  }
+
+  function normalizeGroups(input) {
+    if (!Array.isArray(input)) return [];
+    return input.filter((group) => group && typeof group.id === 'string' && typeof group.name === 'string');
+  }
+
+  function normalizeSnippets(input, validGroupIds) {
+    if (!Array.isArray(input)) return [];
+    return input
+      .filter((item) => item && typeof item.name === 'string' && typeof item.value === 'string')
+      .map((item, index) => ({
+        id: typeof item.id === 'string' ? item.id : `legacy-${index}`,
+        name: item.name,
+        value: item.value,
+        groupId: typeof item.groupId === 'string' && validGroupIds.has(item.groupId) ? item.groupId : null,
+        favorite: item.favorite === true
+      }));
   }
 
   let repositionFrame = 0;
@@ -260,7 +284,7 @@
       hidePanel();
       return;
     }
-    panel.open(state.snippets, rect);
+    panel.open(state.snippets, state.groups, rect);
     scheduleReposition();
   }
 
@@ -269,11 +293,10 @@
     panel.close();
   }
 
-  function handlePanelSelection(index) {
+  function handlePanelSelection(snippet) {
     if (!state.context) {
       return;
     }
-    const snippet = state.snippets[index];
     if (!snippet) {
       return;
     }
@@ -366,7 +389,7 @@
       const button = event.target.closest('button[data-index]');
       if (!button) return;
       const index = Number(button.dataset.index);
-      onSelect(index);
+      onSelect(items[index]);
     });
 
     root.addEventListener('mousemove', (event) => {
@@ -381,10 +404,10 @@
       get isOpen() {
         return !root.hidden;
       },
-      open(nextItems, rect) {
-        items = nextItems;
+      open(nextItems, nextGroups, rect) {
+        items = orderSnippets(nextItems, nextGroups);
         highlightIndex = 0;
-        this.render(items);
+        this.render(nextItems, nextGroups);
         root.hidden = false;
         this.updatePosition(rect);
       },
@@ -399,7 +422,7 @@
       },
       commit() {
         if (!items.length) return;
-        onSelect(highlightIndex);
+        onSelect(items[highlightIndex]);
       },
       contains(node) {
         return root.contains(node);
@@ -430,48 +453,81 @@
         root.style.top = `${top}px`;
         root.style.visibility = '';
       },
-      render(nextItems) {
-        items = nextItems;
+      render(nextItems, nextGroups) {
+        const sections = createSections(nextItems, nextGroups);
+        items = sections.flatMap((section) => section.items);
         list.innerHTML = '';
         if (!items.length) {
           root.hidden = true;
           return;
         }
         highlightIndex = Math.min(highlightIndex, Math.max(items.length - 1, 0));
-        for (let i = 0; i < items.length; i += 1) {
-          const item = items[i];
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.dataset.index = String(i);
-          button.className = 'qs-snippet-item';
+        let itemIndex = 0;
+        for (const section of sections) {
+          const heading = document.createElement('div');
+          heading.className = 'qs-snippet-group';
+          heading.textContent = section.label;
+          list.appendChild(heading);
+          for (const item of section.items) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.dataset.index = String(itemIndex);
+            button.className = 'qs-snippet-item';
 
-          const name = document.createElement('span');
-          name.className = 'qs-snippet-name';
-          name.textContent = item.name;
+            const name = document.createElement('span');
+            name.className = 'qs-snippet-name';
+            name.textContent = item.name;
 
-          const value = document.createElement('span');
-          value.className = 'qs-snippet-value';
-          const preview = item.value.replace(/\s+/g, ' ').trim();
-          value.textContent = preview.length > 80 ? `${preview.slice(0, 77)}...` : preview;
+            const value = document.createElement('span');
+            value.className = 'qs-snippet-value';
+            const preview = item.value.replace(/\s+/g, ' ').trim();
+            value.textContent = preview.length > 80 ? `${preview.slice(0, 77)}...` : preview;
 
-          button.appendChild(name);
-          button.appendChild(value);
-          list.appendChild(button);
+            button.appendChild(name);
+            button.appendChild(value);
+            list.appendChild(button);
+            itemIndex += 1;
+          }
         }
         updateHighlight();
       }
     };
 
     function updateHighlight() {
-      const buttons = list.querySelectorAll('button');
-      buttons.forEach((btn, index) => {
-        if (index === highlightIndex) {
+      const buttons = list.querySelectorAll('button[data-index]');
+      buttons.forEach((btn) => {
+        if (Number(btn.dataset.index) === highlightIndex) {
           btn.classList.add('qs-active');
+          btn.scrollIntoView({ block: 'nearest' });
         } else {
           btn.classList.remove('qs-active');
         }
       });
     }
+  }
+
+  function orderSnippets(snippets, groups) {
+    return createSections(snippets, groups).flatMap((section) => section.items);
+  }
+
+  function createSections(snippets, groups) {
+    const sections = [];
+    const favorites = snippets.filter((snippet) => snippet.favorite);
+    if (favorites.length) {
+      sections.push({ label: 'Favorites', items: favorites });
+    }
+    const remaining = snippets.filter((snippet) => !snippet.favorite);
+    for (const group of groups) {
+      const groupItems = remaining.filter((snippet) => snippet.groupId === group.id);
+      if (groupItems.length) {
+        sections.push({ label: group.name, items: groupItems });
+      }
+    }
+    const ungrouped = remaining.filter((snippet) => !snippet.groupId);
+    if (ungrouped.length) {
+      sections.push({ label: 'Ungrouped', items: ungrouped });
+    }
+    return sections;
   }
 
   function getInputCaretRect(target, position) {
@@ -567,7 +623,16 @@
       .qs-snippet-options {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
+      }
+
+      .qs-snippet-group {
+        padding: 7px 8px 2px;
+        color: #8a8178;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
       }
 
       .qs-snippet-item {

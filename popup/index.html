@@ -7,72 +7,119 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="qs-shell">
-      <header class="soft-panel qs-top">
-        <div class="qs-header">
-          <div class="qs-title">
-            <h1>QuickSlash</h1>
-          </div>
-          <div class="qs-actions">
-            <button id="settingsButton" class="qs-gear" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
-              ⚙
+    <div class="app-shell">
+      <header class="app-header">
+        <h1>QuickSlash</h1>
+        <div class="header-actions">
+          <button id="createButton" class="icon-button icon-button-primary" type="button" aria-label="Create snippet" title="Create snippet">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+          <div class="settings-wrap">
+            <button id="settingsButton" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.52-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.05V3h4v.05a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></svg>
             </button>
-            <div id="settingsMenu" class="qs-settings" aria-hidden="true">
-              <button id="usageButton" type="button">Usage instructions</button>
-              <button id="exportButton" type="button">Export JSON</button>
-              <button id="importButton" type="button">Import JSON</button>
+            <div id="settingsMenu" class="menu settings-menu" role="menu" aria-hidden="true">
+              <button id="groupsButton" type="button" role="menuitem">Manage groups</button>
+              <button id="usageButton" type="button" role="menuitem">Usage instructions</button>
+              <div class="menu-divider"></div>
+              <button id="exportButton" type="button" role="menuitem">Export JSON</button>
+              <button id="importButton" type="button" role="menuitem">Import JSON</button>
             </div>
-            <input id="importInput" type="file" accept="application/json" hidden />
           </div>
-        </div>
-        <div class="qs-tabs" role="tablist">
-          <button class="qs-tab is-active" type="button" role="tab" aria-selected="true" data-tab="list">
-            Saved
-          </button>
-          <button class="qs-tab" type="button" role="tab" aria-selected="false" data-tab="form">
-            Create
-          </button>
+          <input id="importInput" type="file" accept="application/json" hidden />
         </div>
       </header>
 
-      <section class="qs-panel qs-list" data-panel="list" role="tabpanel">
-        <p id="emptyState">No snippets yet. Add your first one.</p>
-        <ul id="snippetList" aria-live="polite"></ul>
-      </section>
+      <main>
+        <section id="listView" class="view">
+          <nav id="groupNav" class="group-nav" aria-label="Snippet groups"></nav>
+          <p id="emptyState" class="empty-state">No favorites yet.</p>
+          <ul id="snippetList" class="snippet-list" aria-live="polite"></ul>
+        </section>
 
-      <form id="snippet-form" class="qs-panel qs-form is-hidden" data-panel="form" role="tabpanel">
-        <label class="qs-field">
-          <span>Name</span>
-          <input id="nameInput" name="name" type="text" autocomplete="off" required maxlength="80" placeholder="Snippet name" />
-        </label>
+        <section id="editorView" class="view" hidden>
+          <div class="view-header">
+            <button class="back-button" type="button" data-action="close-view" aria-label="Back">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+            <div>
+              <p class="eyebrow">Snippet</p>
+              <h2 id="editorTitle">Create snippet</h2>
+            </div>
+          </div>
+          <form id="snippetForm" class="editor-form">
+            <label class="field">
+              <span>Name</span>
+              <input id="nameInput" name="name" type="text" autocomplete="off" required maxlength="80" placeholder="e.g. Project intro" />
+            </label>
+            <label class="field">
+              <span>Value</span>
+              <textarea id="valueInput" name="value" rows="7" required placeholder="Text to insert"></textarea>
+            </label>
+            <label class="field">
+              <span>Group</span>
+              <select id="groupInput" name="group"></select>
+            </label>
+            <label class="favorite-toggle">
+              <input id="favoriteInput" name="favorite" type="checkbox" />
+              <span>Add to Favorites</span>
+            </label>
+            <div class="form-actions">
+              <button class="secondary-button" type="button" data-action="close-view">Cancel</button>
+              <button class="primary-button" type="submit">Save snippet</button>
+            </div>
+          </form>
+        </section>
 
-        <label class="qs-field">
-          <span>Value</span>
-          <textarea id="valueInput" name="value" rows="4" required placeholder="Text to insert"></textarea>
-        </label>
-
-        <div class="qs-form-footer">
-          <button type="submit">Save snippet</button>
-        </div>
-      </form>
+        <section id="groupsView" class="view" hidden>
+          <div class="view-header">
+            <button class="back-button" type="button" data-action="close-view" aria-label="Back">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+            <div>
+              <p class="eyebrow">Organize</p>
+              <h2>Manage groups</h2>
+            </div>
+          </div>
+          <form id="groupForm" class="group-form">
+            <input id="groupNameInput" type="text" maxlength="30" autocomplete="off" placeholder="New group name" aria-label="New group name" />
+            <button class="primary-button" type="submit">Add</button>
+          </form>
+          <p class="helper-text">Groups appear in creation order. Deleting a group moves its snippets to Ungrouped.</p>
+          <ul id="groupList" class="group-list"></ul>
+        </section>
+      </main>
     </div>
-    <div id="toastRegion" class="qs-toast-region" aria-live="polite" aria-atomic="false"></div>
 
-    <div id="usageOverlay" class="qs-overlay" aria-hidden="true">
-      <div class="qs-overlay-panel" role="dialog" aria-modal="true" aria-labelledby="usageTitle">
-        <button id="usageClose" class="qs-overlay-close" type="button" aria-label="Close usage instructions">×</button>
-        <div class="qs-overlay-header">
-          <p class="qs-overlay-eyebrow">QuickSlash</p>
-          <h2 id="usageTitle">Usage Instructions</h2>
-        </div>
-        <ul class="qs-overlay-list">
-          <li><strong>Trigger fast:</strong> type <code>///</code> in any input or editable area to open the picker.</li>
-          <li><strong>Navigate smart:</strong> move with ↑/↓ or your mouse, then press Enter or click to paste.</li>
-          <li><strong>Stay organized:</strong> use the tabs to review saved snippets first, then switch to create.</li>
-          <li><strong>Keep control:</strong> import/export from the gear menu for quick backups.</li>
-        </ul>
+    <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+
+    <div id="usageOverlay" class="overlay" aria-hidden="true">
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="usageTitle">
+        <button id="usageClose" class="dialog-close" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">QuickSlash</p>
+        <h2 id="usageTitle">Use snippets anywhere</h2>
+        <ol class="usage-list">
+          <li>Type <code>///</code> in an input or editable area.</li>
+          <li>Choose a snippet with the mouse or arrow keys.</li>
+          <li>Press Enter to insert it instantly.</li>
+        </ol>
       </div>
     </div>
+
+    <div id="confirmOverlay" class="overlay" aria-hidden="true">
+      <div class="dialog confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+        <div class="confirm-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 8v5M12 17h.01" /><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.73 3h15.14a2 2 0 0 0 1.73-3L13.7 3.8a2 2 0 0 0-3.4 0Z" /></svg>
+        </div>
+        <h2 id="confirmTitle">Delete item?</h2>
+        <p id="confirmMessage"></p>
+        <div class="confirm-actions">
+          <button id="confirmCancel" class="secondary-button" type="button">Cancel</button>
+          <button id="confirmAccept" class="danger-button" type="button">Delete</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="popup.js"></script>
   </body>
 </html>
