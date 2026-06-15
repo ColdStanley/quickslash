@@ -3,23 +3,39 @@
   "name": "QuickSlash",
   "description": "Fast local snippets you can drop into any input by typing ///.",
   "version": "1.0.0",
-  "permissions": ["storage"],
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "clipboardWrite"
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_title": "QuickSlash",
-    "default_popup": "popup/index.html"
+    "default_title": "QuickSlash"
+  },
+  "side_panel": {
+    "default_path": "popup/index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["scripts/content.js"],
-      "run_at": "document_idle",
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "scripts/content.js"
+      ],
+      "run_at": "document_end",
       "all_frames": true,
       "match_about_blank": true
     }
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ]
 }

@@ -7,25 +7,40 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="qs-app">
-      <header class="qs-header">
-        <div class="qs-title">
-          <h1>QuickSlash</h1>
-          <p>Store reusable Name/Value pairs for fast /// insertion.</p>
-        </div>
-        <div class="qs-actions">
-          <button id="settingsButton" class="qs-gear" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
-            ⚙
-          </button>
-          <div id="settingsMenu" class="qs-settings" hidden>
-            <button id="exportButton" type="button">Export JSON</button>
-            <button id="importButton" type="button">Import JSON</button>
+    <div class="qs-shell">
+      <header class="soft-panel qs-top">
+        <div class="qs-header">
+          <div class="qs-title">
+            <h1>QuickSlash</h1>
           </div>
-          <input id="importInput" type="file" accept="application/json" hidden />
+          <div class="qs-actions">
+            <button id="settingsButton" class="qs-gear" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings">
+              ⚙
+            </button>
+            <div id="settingsMenu" class="qs-settings" aria-hidden="true">
+              <button id="usageButton" type="button">Usage instructions</button>
+              <button id="exportButton" type="button">Export JSON</button>
+              <button id="importButton" type="button">Import JSON</button>
+            </div>
+            <input id="importInput" type="file" accept="application/json" hidden />
+          </div>
+        </div>
+        <div class="qs-tabs" role="tablist">
+          <button class="qs-tab is-active" type="button" role="tab" aria-selected="true" data-tab="list">
+            Saved
+          </button>
+          <button class="qs-tab" type="button" role="tab" aria-selected="false" data-tab="form">
+            Create
+          </button>
         </div>
       </header>
 
-      <form id="snippet-form" class="qs-form">
+      <section class="qs-panel qs-list" data-panel="list" role="tabpanel">
+        <p id="emptyState">No snippets yet. Add your first one.</p>
+        <ul id="snippetList" aria-live="polite"></ul>
+      </section>
+
+      <form id="snippet-form" class="qs-panel qs-form is-hidden" data-panel="form" role="tabpanel">
         <label class="qs-field">
           <span>Name</span>
           <input id="nameInput" name="name" type="text" autocomplete="off" required maxlength="80" placeholder="Snippet name" />
@@ -37,17 +52,27 @@
         </label>
 
         <div class="qs-form-footer">
-          <p id="formMessage" aria-live="polite"></p>
           <button type="submit">Save snippet</button>
         </div>
       </form>
+    </div>
+    <div id="toastRegion" class="qs-toast-region" aria-live="polite" aria-atomic="false"></div>
 
-      <section class="qs-list">
-        <h2>Saved snippets</h2>
-        <p id="emptyState">No snippets yet. Add your first one above.</p>
-        <ul id="snippetList" aria-live="polite"></ul>
-      </section>
-    </main>
+    <div id="usageOverlay" class="qs-overlay" aria-hidden="true">
+      <div class="qs-overlay-panel" role="dialog" aria-modal="true" aria-labelledby="usageTitle">
+        <button id="usageClose" class="qs-overlay-close" type="button" aria-label="Close usage instructions">×</button>
+        <div class="qs-overlay-header">
+          <p class="qs-overlay-eyebrow">QuickSlash</p>
+          <h2 id="usageTitle">Usage Instructions</h2>
+        </div>
+        <ul class="qs-overlay-list">
+          <li><strong>Trigger fast:</strong> type <code>///</code> in any input or editable area to open the picker.</li>
+          <li><strong>Navigate smart:</strong> move with ↑/↓ or your mouse, then press Enter or click to paste.</li>
+          <li><strong>Stay organized:</strong> use the tabs to review saved snippets first, then switch to create.</li>
+          <li><strong>Keep control:</strong> import/export from the gear menu for quick backups.</li>
+        </ul>
+      </div>
+    </div>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

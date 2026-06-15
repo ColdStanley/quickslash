@@ -28,11 +28,21 @@
   document.addEventListener('focusin', handleFocusIn, true);
   document.addEventListener('selectionchange', handleSelectionChange);
   window.addEventListener('resize', () => hidePanel());
-  window.addEventListener('scroll', () => hidePanel(), true);
+  window.addEventListener('scroll', handleScroll, true);
+  const mutationObserver = new MutationObserver(() => scheduleReposition());
+  const observerTarget = document.body || document.documentElement;
+  if (observerTarget) {
+    mutationObserver.observe(observerTarget, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true
+    });
+  }
 
   function handleInput(event) {
-    const target = event.target;
-    if (!isEditable(target)) {
+    const target = getEditableTarget(event);
+    if (!target) {
       hidePanel();
       return;
     }
@@ -79,12 +89,13 @@
   }
 
   function handleFocusIn(event) {
-    if (!isEditable(event.target)) {
+    const target = getEditableTarget(event);
+    if (!target) {
       hidePanel();
       return;
     }
 
-    if (panel.isOpen && state.context && event.target !== state.context.target) {
+    if (panel.isOpen && state.context && target !== state.context.target) {
       hidePanel();
     }
   }
@@ -105,6 +116,7 @@
     if (!state.context.isValid()) {
       hidePanel();
     }
+    scheduleReposition();
   }
 
   function loadSnippets() {
@@ -113,12 +125,25 @@
     });
   }
 
+  let repositionFrame = 0;
+  function scheduleReposition() {
+    if (repositionFrame) return;
+    repositionFrame = requestAnimationFrame(() => {
+      repositionFrame = 0;
+      if (!state.context || !panel.isOpen) return;
+      const rect = state.context.getRect();
+      if (rect) {
+        panel.updatePosition(rect);
+      }
+    });
+  }
+
   function createTriggerContext(target) {
     if (target instanceof HTMLTextAreaElement || isTextInput(target)) {
       return createTextContext(target);
     }
 
-    if (target.isContentEditable) {
+    if (target.isContentEditable || hasRoleTextbox(target)) {
       return createContentEditableContext(target);
     }
 
@@ -163,7 +188,7 @@
   }
 
   function createContentEditableContext(target) {
-    if (!target.isContentEditable) return null;
+    if (!target.isContentEditable && !hasRoleTextbox(target)) return null;
     const selection = document.getSelection();
     if (!selection || !selection.rangeCount) {
       return null;
@@ -236,6 +261,7 @@
       return;
     }
     panel.open(state.snippets, rect);
+    scheduleReposition();
   }
 
   function hidePanel() {
@@ -256,7 +282,39 @@
   }
 
   function isEditable(element) {
-    return Boolean(element) && (element instanceof HTMLTextAreaElement || isTextInput(element) || element.isContentEditable);
+    return Boolean(element) && (
+      element instanceof HTMLTextAreaElement ||
+      isTextInput(element) ||
+      element.isContentEditable ||
+      hasRoleTextbox(element)
+    );
+  }
+
+  function getEditableTarget(event) {
+    if (event && typeof event.composedPath === 'function') {
+      const path = event.composedPath();
+      for (const node of path) {
+        if (isEditable(node)) {
+          return node;
+        }
+      }
+    }
+    if (event && isEditable(event.target)) {
+      return event.target;
+    }
+    const active = getDeepActiveElement();
+    if (isEditable(active)) {
+      return active;
+    }
+    return null;
+  }
+
+  function getDeepActiveElement(root = document) {
+    let active = root.activeElement;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    return active;
   }
 
   function isTextInput(element) {
@@ -269,6 +327,20 @@
     ]);
     const type = (element.type || 'text').toLowerCase();
     return !element.readOnly && !element.disabled && !disallowed.has(type);
+  }
+
+  function hasRoleTextbox(element) {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    const role = element.getAttribute('role');
+    if (role !== 'textbox') {
+      return false;
+    }
+    if (element.getAttribute('aria-hidden') === 'true') {
+      return false;
+    }
+    return !element.hasAttribute('disabled');
   }
 
   function createPanel(onSelect) {
@@ -313,15 +385,8 @@
         items = nextItems;
         highlightIndex = 0;
         this.render(items);
-        const viewportWidth = document.documentElement.clientWidth;
-        const viewportHeight = window.innerHeight;
-        const baseLeft = Number.isFinite(rect.left) ? rect.left : 16;
-        const baseTop = Number.isFinite(rect.bottom) ? rect.bottom : 32;
-        const left = Math.min(Math.max(8, baseLeft), viewportWidth - 280);
-        const top = Math.min(baseTop + 6, viewportHeight - 10);
-        root.style.left = `${left}px`;
-        root.style.top = `${top}px`;
         root.hidden = false;
+        this.updatePosition(rect);
       },
       close() {
         root.hidden = true;
@@ -338,6 +403,32 @@
       },
       contains(node) {
         return root.contains(node);
+      },
+      updatePosition(rect) {
+        if (!rect) return;
+        const viewportWidth = document.documentElement.clientWidth;
+        const viewportHeight = window.innerHeight;
+        const margin = 8;
+        root.style.visibility = 'hidden';
+        root.hidden = false;
+        const panelRect = root.getBoundingClientRect();
+        const leftBase = Number.isFinite(rect.left) ? rect.left : margin + 8;
+        const maxLeft = Math.max(margin, viewportWidth - panelRect.width - margin);
+        const left = clamp(leftBase, margin, maxLeft);
+        const spaceBelow = viewportHeight - rect.bottom;
+        const spaceAbove = rect.top;
+        let top;
+        if (spaceBelow >= panelRect.height + margin || spaceBelow >= spaceAbove) {
+          top = rect.bottom + margin;
+          if (top + panelRect.height > viewportHeight - margin) {
+            top = Math.max(margin, viewportHeight - panelRect.height - margin);
+          }
+        } else {
+          top = Math.max(margin, rect.top - panelRect.height - margin);
+        }
+        root.style.left = `${left}px`;
+        root.style.top = `${top}px`;
+        root.style.visibility = '';
       },
       render(nextItems) {
         items = nextItems;
@@ -453,16 +544,20 @@
       #qs-snippet-panel {
         position: fixed;
         z-index: 2147483646;
-        min-width: 240px;
-        max-width: 320px;
-        max-height: 260px;
+        min-width: 260px;
+        max-width: 340px;
+        max-height: 280px;
         overflow-y: auto;
-        background: rgba(15, 23, 42, 0.97);
-        color: #f8fafc;
-        border-radius: 12px;
-        box-shadow: 0 15px 40px rgba(15, 23, 42, 0.45);
-        padding: 8px;
-        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #fcfcff;
+        color: #111111;
+        border-radius: 9px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 30px 60px rgba(15, 23, 42, 0.18), 0 10px 20px rgba(15, 23, 42, 0.12);
+        padding: 12px;
+        font-family: 'Playfair Display', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        will-change: transform, opacity;
+        animation: qsSoftFade 0.2s ease forwards;
       }
 
       #qs-snippet-panel[hidden] {
@@ -472,7 +567,7 @@
       .qs-snippet-options {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
       }
 
       .qs-snippet-item {
@@ -483,32 +578,59 @@
         text-align: left;
         border: none;
         border-radius: 8px;
-        padding: 8px 10px;
-        background: transparent;
+        padding: 12px 14px;
+        background: rgba(15, 23, 42, 0.02);
         color: inherit;
         cursor: pointer;
-        transition: background 0.15s ease;
+        transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
         font-size: 13px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
       }
 
       .qs-snippet-item .qs-snippet-name {
         font-weight: 600;
-        margin-bottom: 2px;
+        margin-bottom: 4px;
+        font-size: 13px;
       }
 
       .qs-snippet-item .qs-snippet-value {
-        opacity: 0.8;
-        font-size: 12px;
+        opacity: 0.75;
+        font-size: 11px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        color: #6b7280;
       }
 
       .qs-snippet-item.qs-active,
       .qs-snippet-item:hover {
-        background: rgba(99, 102, 241, 0.25);
+        background: rgba(255, 189, 89, 0.18);
+        box-shadow: 0 20px 35px rgba(255, 189, 89, 0.25);
+        transform: translateY(-1px);
+      }
+
+      @keyframes qsSoftFade {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
       }
     `;
     document.documentElement.appendChild(style);
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function handleScroll(event) {
+    if (panel.contains(event.target)) {
+      return;
+    }
+    hidePanel();
   }
 })();
