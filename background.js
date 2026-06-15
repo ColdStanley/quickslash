@@ -50,3 +50,65 @@ chrome.action.onClicked.addListener(async (tab) => {
     await openSidePanel(tab.id);
   }
 });
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== 'QUICKSLASH_AUTOFILL_PAGE') {
+    return false;
+  }
+
+  handleAutofillPage(message).then(sendResponse);
+  return true;
+});
+
+async function handleAutofillPage(message) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      return { ok: false, message: 'No active page found.' };
+    }
+
+    const frames = await getTabFrames(tab.id);
+    const targets = frames.length ? frames : [{ frameId: 0 }];
+    const results = await Promise.all(
+      targets.map((frame) => sendAutofillToFrame(tab.id, frame.frameId, message.snippets))
+    );
+    const successful = results.filter(Boolean);
+    if (!successful.length) {
+      return { ok: false, message: 'Autofill is not available on this page.' };
+    }
+    return successful.reduce(
+      (total, item) => ({
+        ok: true,
+        scanned: total.scanned + (item.scanned || 0),
+        matched: total.matched + (item.matched || 0),
+        filled: total.filled + (item.filled || 0),
+        skippedNonEmpty: total.skippedNonEmpty + (item.skippedNonEmpty || 0)
+      }),
+      { ok: true, scanned: 0, matched: 0, filled: 0, skippedNonEmpty: 0 }
+    );
+  } catch (error) {
+    console.warn('QuickSlash autofill failed:', error);
+    return { ok: false, message: 'Autofill failed on this page.' };
+  }
+}
+
+async function getTabFrames(tabId) {
+  try {
+    return await chrome.webNavigation.getAllFrames({ tabId });
+  } catch (error) {
+    console.warn('QuickSlash could not inspect frames:', error);
+    return [];
+  }
+}
+
+async function sendAutofillToFrame(tabId, frameId, snippets) {
+  try {
+    return await chrome.tabs.sendMessage(
+      tabId,
+      { type: 'QUICKSLASH_AUTOFILL_FRAME', snippets },
+      { frameId }
+    );
+  } catch (_error) {
+    return null;
+  }
+}

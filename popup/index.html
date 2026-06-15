@@ -14,6 +14,9 @@
           <button id="createButton" class="icon-button icon-button-primary" type="button" aria-label="Create snippet" title="Create snippet">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           </button>
+          <button id="autofillButton" class="icon-button" type="button" aria-label="Autofill current page" title="Autofill current page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16" /><path d="M4 12h10" /><path d="M4 19h7" /><path d="m17 16 2 2 4-5" /></svg>
+          </button>
           <div class="settings-wrap">
             <button id="settingsButton" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.97 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.52-1.03H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 10 3.05V3h4v.05a1.7 1.7 0 0 0 1.03 1.52 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15Z" /></svg>
@@ -54,11 +57,30 @@
             </label>
             <label class="field">
               <span>Value</span>
-              <textarea id="valueInput" name="value" rows="7" required placeholder="Text to insert"></textarea>
+              <textarea id="valueInput" name="value" rows="5" placeholder="Text to insert (optional if PDF is attached)"></textarea>
             </label>
+            <div class="field">
+              <span>Attachment (PDF)</span>
+              <div id="pdfDropzone" class="pdf-dropzone">
+                <div class="dropzone-empty">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="dropzone-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                  <span>Drag & drop PDF here, or <span class="browse-link">browse</span></span>
+                </div>
+                <div class="dropzone-filled" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="pdf-file-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  <span id="pdfFileName" class="pdf-name">document.pdf</span>
+                  <button id="removePdfButton" type="button" class="remove-pdf-btn" aria-label="Remove PDF">×</button>
+                </div>
+                <input id="pdfFileInput" type="file" accept="application/pdf" hidden />
+              </div>
+            </div>
             <label class="field">
               <span>Group</span>
               <select id="groupInput" name="group"></select>
+            </label>
+            <label class="field">
+              <span>Match form names</span>
+              <textarea id="matchNamesInput" name="matchNames" rows="4" placeholder="Address&#10;Location&#10;Home Town"></textarea>
             </label>
             <label class="favorite-toggle">
               <input id="favoriteInput" name="favorite" type="checkbox" />
