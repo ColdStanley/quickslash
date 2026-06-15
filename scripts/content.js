@@ -600,9 +600,11 @@
       #qs-snippet-panel {
         position: fixed;
         z-index: 2147483646;
-        min-width: 260px;
-        max-width: 340px;
+        box-sizing: border-box;
+        width: min(340px, calc(100vw - 16px));
+        min-width: min(260px, calc(100vw - 16px));
         max-height: 280px;
+        overflow-x: hidden;
         overflow-y: auto;
         background: #fcfcff;
         color: #111111;
@@ -624,22 +626,31 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
+        width: 100%;
+        min-width: 0;
       }
 
       .qs-snippet-group {
+        max-width: 100%;
+        overflow: hidden;
         padding: 7px 8px 2px;
         color: #8a8178;
         font-size: 9px;
         font-weight: 700;
         letter-spacing: 0.1em;
+        text-overflow: ellipsis;
         text-transform: uppercase;
+        white-space: nowrap;
       }
 
       .qs-snippet-item {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
+        box-sizing: border-box;
         width: 100%;
+        min-width: 0;
+        max-width: 100%;
         text-align: left;
         border: none;
         border-radius: 8px;
@@ -653,12 +664,26 @@
       }
 
       .qs-snippet-item .qs-snippet-name {
+        display: -webkit-box;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
         font-weight: 600;
         margin-bottom: 4px;
         font-size: 13px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
       }
 
       .qs-snippet-item .qs-snippet-value {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
         opacity: 0.75;
         font-size: 11px;
         white-space: nowrap;
