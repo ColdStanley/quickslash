@@ -1,8 +1,13 @@
 const SNIPPETS_KEY = 'quickSlashSnippets';
 const GROUPS_KEY = 'quickSlashGroups';
-const DATA_VERSION = 4;
+const AUTO_AUTOFILL_KEY = 'quickSlashAutoAutofill';
+const DATA_VERSION = 5;
 const UNGROUPED = 'ungrouped';
 const RESERVED_GROUP_NAMES = new Set(['favorites', 'all', 'ungrouped']);
+const FIELD_TYPES = new Set(['text', 'dropdown', 'file', 'checkbox']);
+const CHECKBOX_ACTIONS = new Set(['check', 'uncheck']);
+const TOAST_DURATION_MS = 4200;
+const ERROR_TOAST_DURATION_MS = 6500;
 
 const ICONS = {
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.78 5.63 6.22.9-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.92 1.06-6.2L3 9.53l6.22-.9L12 3Z" /></svg>',
@@ -16,6 +21,7 @@ const elements = {
   autofillButton: document.getElementById('autofillButton'),
   settingsButton: document.getElementById('settingsButton'),
   settingsMenu: document.getElementById('settingsMenu'),
+  autoAutofillInput: document.getElementById('autoAutofillInput'),
   groupsButton: document.getElementById('groupsButton'),
   usageButton: document.getElementById('usageButton'),
   exportButton: document.getElementById('exportButton'),
@@ -30,7 +36,10 @@ const elements = {
   snippetForm: document.getElementById('snippetForm'),
   editorTitle: document.getElementById('editorTitle'),
   nameInput: document.getElementById('nameInput'),
+  fieldTypeInput: document.getElementById('fieldTypeInput'),
   valueInput: document.getElementById('valueInput'),
+  checkboxActionField: document.getElementById('checkboxActionField'),
+  checkboxActionInput: document.getElementById('checkboxActionInput'),
   groupInput: document.getElementById('groupInput'),
   matchNamesInput: document.getElementById('matchNamesInput'),
   favoriteInput: document.getElementById('favoriteInput'),
@@ -65,6 +74,7 @@ let menuReturnId = null;
 let usageReturnTarget = null;
 let currentPdfData = null;
 let currentPdfName = null;
+let draggedSnippetId = null;
 
 init();
 
@@ -73,6 +83,8 @@ async function init() {
   const data = await loadAndMigrate();
   snippets = data.snippets;
   groups = data.groups;
+  elements.autoAutofillInput.checked = data.autoAutofillEnabled;
+  syncAutoAutofillToggle();
   render();
 }
 
@@ -105,9 +117,16 @@ function bindEvents() {
   elements.exportButton.addEventListener('click', handleExport);
   elements.importButton.addEventListener('click', () => elements.importInput.click());
   elements.importInput.addEventListener('change', handleImport);
+  elements.autoAutofillInput.addEventListener('change', handleAutoAutofillChange);
+  elements.fieldTypeInput.addEventListener('change', updateTypeUI);
   elements.groupNav.addEventListener('click', handleNavClick);
   elements.snippetList.addEventListener('click', handleSnippetClick);
   elements.snippetList.addEventListener('change', handleSnippetChange);
+  elements.snippetList.addEventListener('dragstart', handleSnippetDragStart);
+  elements.snippetList.addEventListener('dragover', handleSnippetDragOver);
+  elements.snippetList.addEventListener('dragleave', handleSnippetDragLeave);
+  elements.snippetList.addEventListener('drop', handleSnippetDrop);
+  elements.snippetList.addEventListener('dragend', handleSnippetDragEnd);
   elements.snippetForm.addEventListener('submit', handleSnippetSubmit);
   elements.groupForm.addEventListener('submit', handleGroupSubmit);
   elements.groupList.addEventListener('click', handleGroupClick);
@@ -157,26 +176,29 @@ function bindEvents() {
   });
 
   chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area !== 'local' || (!changes[SNIPPETS_KEY] && !changes[GROUPS_KEY])) return;
+    if (area !== 'local' || (!changes[SNIPPETS_KEY] && !changes[GROUPS_KEY] && !changes[AUTO_AUTOFILL_KEY])) return;
     const data = await loadAndMigrate(false);
     snippets = data.snippets;
     groups = data.groups;
+    elements.autoAutofillInput.checked = data.autoAutofillEnabled;
+    syncAutoAutofillToggle();
     ensureValidFilter();
     render();
   });
 }
 
 async function loadAndMigrate(shouldPersist = true) {
-  const stored = await storageGet({ [SNIPPETS_KEY]: [], [GROUPS_KEY]: [] });
+  const stored = await storageGet({ [SNIPPETS_KEY]: [], [GROUPS_KEY]: [], [AUTO_AUTOFILL_KEY]: false });
   const normalizedGroups = normalizeGroups(stored[GROUPS_KEY]);
   const validGroupIds = new Set(normalizedGroups.map((group) => group.id));
   const normalizedSnippets = normalizeSnippets(stored[SNIPPETS_KEY], validGroupIds);
+  const autoAutofillEnabled = stored[AUTO_AUTOFILL_KEY] === true;
   const changed = JSON.stringify(stored[GROUPS_KEY]) !== JSON.stringify(normalizedGroups)
     || JSON.stringify(stored[SNIPPETS_KEY]) !== JSON.stringify(normalizedSnippets);
   if (shouldPersist && changed) {
     await persistData(normalizedSnippets, normalizedGroups);
   }
-  return { snippets: normalizedSnippets, groups: normalizedGroups };
+  return { snippets: normalizedSnippets, groups: normalizedGroups, autoAutofillEnabled };
 }
 
 function normalizeGroups(input) {
@@ -210,10 +232,11 @@ function normalizeSnippets(input, validGroupIds) {
     const name = item.name.trim().slice(0, 80);
     const nameKey = name.toLowerCase();
 
-    // 如果既没有 value，也没有 pdfData，则视为无效
+    const fieldType = normalizeFieldType(item.fieldType);
     const hasValue = typeof item.value === 'string' && item.value.trim();
     const hasPdf = typeof item.pdfData === 'string' && item.pdfData.trim();
-    if (!name || (!hasValue && !hasPdf) || seenNames.has(nameKey)) continue;
+    const hasUsableData = fieldType === 'checkbox' || (fieldType === 'file' ? hasPdf : hasValue || hasPdf);
+    if (!name || !hasUsableData || seenNames.has(nameKey)) continue;
 
     const id = typeof item.id === 'string' && item.id.trim() && !seenIds.has(item.id)
       ? item.id
@@ -227,6 +250,8 @@ function normalizeSnippets(input, validGroupIds) {
       id,
       name,
       value: typeof item.value === 'string' ? item.value : '',
+      fieldType,
+      checkboxAction: normalizeCheckboxAction(item.checkboxAction),
       groupId,
       favorite: item.favorite === true,
       favoriteOrder: Number.isFinite(item.favoriteOrder) ? item.favoriteOrder : null,
@@ -238,6 +263,14 @@ function normalizeSnippets(input, validGroupIds) {
   }
   normalizeFavoriteOrder(result);
   return result;
+}
+
+function normalizeFieldType(value) {
+  return FIELD_TYPES.has(value) ? value : 'text';
+}
+
+function normalizeCheckboxAction(value) {
+  return CHECKBOX_ACTIONS.has(value) ? value : 'check';
 }
 
 function render() {
@@ -276,6 +309,8 @@ function renderList() {
     const li = document.createElement('li');
     li.className = 'snippet-card';
     li.dataset.id = snippet.id;
+    li.draggable = canReorderCurrentFilter();
+    li.setAttribute('aria-label', `${snippet.name}. Drag to reorder.`);
     li.classList.toggle('is-menu-open', openMenuId === snippet.id);
 
     const body = document.createElement('button');
@@ -338,22 +373,6 @@ function createSnippetMenu(snippet) {
   menu.className = 'menu snippet-menu is-open';
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', `Actions for ${snippet.name}`);
-  const orderActions = getOrderActions(snippet);
-  if (orderActions.canMoveUp) {
-    const moveUp = menuButton('Move up', 'move-up', snippet.id);
-    moveUp.setAttribute('role', 'menuitem');
-    menu.appendChild(moveUp);
-  }
-  if (orderActions.canMoveDown) {
-    const moveDown = menuButton('Move down', 'move-down', snippet.id);
-    moveDown.setAttribute('role', 'menuitem');
-    menu.appendChild(moveDown);
-  }
-  if (orderActions.canMoveUp || orderActions.canMoveDown) {
-    const divider = document.createElement('div');
-    divider.className = 'menu-divider';
-    menu.appendChild(divider);
-  }
   const favorite = menuButton(
     snippet.favorite ? 'Remove from Favorites' : 'Add to Favorites',
     'favorite',
@@ -378,19 +397,6 @@ function createSnippetMenu(snippet) {
   remove.setAttribute('role', 'menuitem');
   menu.append(favorite, edit, moveLabel, remove);
   return menu;
-}
-
-function getOrderActions(snippet) {
-  if (activeFilter === 'all') return { canMoveUp: false, canMoveDown: false };
-  if (activeFilter !== 'favorites' && activeFilter !== UNGROUPED && !groups.some((group) => group.id === activeFilter)) {
-    return { canMoveUp: false, canMoveDown: false };
-  }
-  const visible = getFilteredSnippets();
-  const index = visible.findIndex((item) => item.id === snippet.id);
-  return {
-    canMoveUp: index > 0,
-    canMoveDown: index >= 0 && index < visible.length - 1
-  };
 }
 
 function menuButton(label, action, id) {
@@ -496,12 +502,6 @@ async function handleSnippetClick(event) {
     showToast(snippet.favorite ? 'Added to Favorites.' : 'Removed from Favorites.');
     return;
   }
-  if (action === 'move-up' || action === 'move-down') {
-    moveSnippet(snippet, action === 'move-up' ? -1 : 1);
-    openMenuId = null;
-    await saveCurrentData();
-    return;
-  }
   if (action === 'copy') {
     try {
       await copyToClipboard(snippet.value);
@@ -530,6 +530,115 @@ async function handleSnippetClick(event) {
   }
 }
 
+function handleSnippetDragStart(event) {
+  const card = event.target.closest('.snippet-card[data-id]');
+  if (!card || !canReorderCurrentFilter()) {
+    event.preventDefault();
+    return;
+  }
+  draggedSnippetId = card.dataset.id;
+  openMenuId = null;
+  card.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggedSnippetId);
+}
+
+function handleSnippetDragOver(event) {
+  if (!draggedSnippetId || !canReorderCurrentFilter()) return;
+  const card = event.target.closest('.snippet-card[data-id]');
+  if (!card || card.dataset.id === draggedSnippetId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  setDragTarget(card, getDropPlacement(card, event.clientY));
+}
+
+function handleSnippetDragLeave(event) {
+  const card = event.target.closest('.snippet-card[data-id]');
+  if (card && !card.contains(event.relatedTarget)) {
+    clearDragTarget(card);
+  }
+}
+
+async function handleSnippetDrop(event) {
+  if (!draggedSnippetId || !canReorderCurrentFilter()) return;
+  const card = event.target.closest('.snippet-card[data-id]');
+  if (!card || card.dataset.id === draggedSnippetId) return;
+  event.preventDefault();
+  const placement = getDropPlacement(card, event.clientY);
+  const moved = reorderSnippet(draggedSnippetId, card.dataset.id, placement);
+  draggedSnippetId = null;
+  clearDragState();
+  if (moved) {
+    await saveCurrentData();
+    showToast('Snippet order updated.');
+  }
+}
+
+function handleSnippetDragEnd() {
+  draggedSnippetId = null;
+  clearDragState();
+}
+
+function setDragTarget(card, placement) {
+  elements.snippetList.querySelectorAll('.snippet-card.is-drop-before, .snippet-card.is-drop-after').forEach(clearDragTarget);
+  card.classList.toggle('is-drop-before', placement === 'before');
+  card.classList.toggle('is-drop-after', placement === 'after');
+}
+
+function clearDragTarget(card) {
+  card.classList.remove('is-drop-before', 'is-drop-after');
+}
+
+function clearDragState() {
+  elements.snippetList.querySelectorAll('.snippet-card').forEach((card) => {
+    card.classList.remove('is-dragging', 'is-drop-before', 'is-drop-after');
+  });
+}
+
+function getDropPlacement(card, clientY) {
+  const rect = card.getBoundingClientRect();
+  return clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+}
+
+function canReorderCurrentFilter() {
+  return activeFilter === 'favorites'
+    || activeFilter === UNGROUPED
+    || groups.some((group) => group.id === activeFilter);
+}
+
+function reorderSnippet(sourceId, targetId, placement) {
+  const visible = getFilteredSnippets();
+  const sourceIndex = visible.findIndex((snippet) => snippet.id === sourceId);
+  const targetIndex = visible.findIndex((snippet) => snippet.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return false;
+
+  const reordered = [...visible];
+  const [source] = reordered.splice(sourceIndex, 1);
+  let insertIndex = reordered.findIndex((snippet) => snippet.id === targetId);
+  if (insertIndex < 0) return false;
+  if (placement === 'after') insertIndex += 1;
+  reordered.splice(insertIndex, 0, source);
+
+  if (reordered.every((snippet, index) => snippet.id === visible[index].id)) return false;
+
+  if (activeFilter === 'favorites') {
+    reordered.forEach((snippet, index) => {
+      snippet.favoriteOrder = index;
+    });
+    return true;
+  }
+
+  const reorderedIds = new Set(reordered.map((snippet) => snippet.id));
+  let nextIndex = 0;
+  snippets = snippets.map((snippet) => {
+    if (!reorderedIds.has(snippet.id)) return snippet;
+    const next = reordered[nextIndex];
+    nextIndex += 1;
+    return next;
+  });
+  return true;
+}
+
 async function handleSnippetChange(event) {
   const select = event.target.closest('select[data-action="move"]');
   if (!select) return;
@@ -547,25 +656,50 @@ function openEditor(snippet = null) {
   elements.snippetForm.reset();
   renderGroupOptions();
   elements.nameInput.value = snippet?.name || '';
+  elements.fieldTypeInput.value = normalizeFieldType(snippet?.fieldType);
   elements.valueInput.value = snippet?.value || '';
+  elements.checkboxActionInput.value = normalizeCheckboxAction(snippet?.checkboxAction);
   elements.groupInput.value = snippet?.groupId || UNGROUPED;
   elements.matchNamesInput.value = snippet?.matchNames?.join('\n') || '';
   elements.favoriteInput.checked = snippet?.favorite || false;
   currentPdfData = snippet?.pdfData || null;
   currentPdfName = snippet?.pdfName || null;
+  updateTypeUI();
   updatePdfUI();
   openView('editor');
   elements.nameInput.focus();
 }
 
+function updateTypeUI() {
+  const fieldType = normalizeFieldType(elements.fieldTypeInput.value);
+  elements.checkboxActionField.hidden = fieldType !== 'checkbox';
+  elements.valueInput.disabled = fieldType === 'checkbox';
+  elements.valueInput.placeholder = fieldType === 'checkbox'
+    ? 'Checkbox items use the action below.'
+    : 'Text to insert (optional if PDF is attached)';
+  if (fieldType === 'checkbox') {
+    elements.valueInput.value = '';
+  }
+}
+
+function validateSnippetValue(fieldType, value, pdfData) {
+  if (fieldType === 'checkbox') return '';
+  if (fieldType === 'file') {
+    return pdfData ? '' : 'A PDF attachment is required for File/PDF items.';
+  }
+  return value.trim() ? '' : 'Value is required for this item type.';
+}
+
 async function handleSnippetSubmit(event) {
   event.preventDefault();
   const name = elements.nameInput.value.trim();
+  const fieldType = normalizeFieldType(elements.fieldTypeInput.value);
   const value = elements.valueInput.value;
   if (!name) return showToast('Name is required.', 'error');
-  if (!value.trim() && !currentPdfData) return showToast('Value or a PDF attachment is required.', 'error');
-  const duplicate = snippets.some((item) => item.id !== editingId && item.name.toLowerCase() === name.toLowerCase());
-  if (duplicate) return showToast('Name must be unique.', 'error');
+  const valueError = validateSnippetValue(fieldType, value, currentPdfData);
+  if (valueError) return showToast(valueError, 'error');
+  const duplicate = snippets.find((item) => item.id !== editingId && item.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) return showToast(`Snippet name "${name}" already exists as "${duplicate.name}".`, 'error');
   const matchNames = parseMatchNames(elements.matchNamesInput.value);
   const duplicateMatchName = findDuplicateMatchName(matchNames, editingId);
   if (duplicateMatchName) return showToast(`Match name already used: ${duplicateMatchName}`, 'error');
@@ -575,6 +709,8 @@ async function handleSnippetSubmit(event) {
     id: snippet?.id || createId(),
     name,
     value,
+    fieldType,
+    checkboxAction: normalizeCheckboxAction(elements.checkboxActionInput.value),
     groupId: elements.groupInput.value === UNGROUPED ? null : elements.groupInput.value,
     favorite: elements.favoriteInput.checked,
     favoriteOrder: getEditorFavoriteOrder(snippet),
@@ -657,8 +793,9 @@ function validateGroupName(name, excludeId = null) {
   if (!name) return 'Group name is required.';
   if (name.length > 30) return 'Group name must be 30 characters or fewer.';
   if (RESERVED_GROUP_NAMES.has(name.toLowerCase())) return 'This group name is reserved.';
-  if (groups.some((group) => group.id !== excludeId && group.name.toLowerCase() === name.toLowerCase())) {
-    return 'Group name must be unique.';
+  const duplicate = groups.find((group) => group.id !== excludeId && group.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) {
+    return `Group name "${name}" already exists as "${duplicate.name}".`;
   }
   return '';
 }
@@ -690,25 +827,6 @@ function getFilteredSnippets() {
   if (activeFilter === 'all') return snippets;
   if (activeFilter === UNGROUPED) return snippets.filter((snippet) => !snippet.groupId);
   return snippets.filter((snippet) => snippet.groupId === activeFilter);
-}
-
-function moveSnippet(snippet, direction) {
-  const visible = getFilteredSnippets();
-  const index = visible.findIndex((item) => item.id === snippet.id);
-  const target = visible[index + direction];
-  if (index < 0 || !target) return;
-
-  if (activeFilter === 'favorites') {
-    const currentOrder = snippet.favoriteOrder;
-    snippet.favoriteOrder = target.favoriteOrder;
-    target.favoriteOrder = currentOrder;
-    normalizeFavoriteOrder(snippets);
-    return;
-  }
-
-  const currentIndex = snippets.findIndex((item) => item.id === snippet.id);
-  const targetIndex = snippets.findIndex((item) => item.id === target.id);
-  [snippets[currentIndex], snippets[targetIndex]] = [snippets[targetIndex], snippets[currentIndex]];
 }
 
 function moveSnippetToGroupEnd(snippet, groupId) {
@@ -785,12 +903,16 @@ async function persistData(nextSnippets, nextGroups) {
 
 async function handleAutofill() {
   const autofillSnippets = snippets
-    .filter((snippet) => snippet.matchNames?.length && snippet.value.trim())
+    .filter((snippet) => snippet.matchNames?.length && hasAutofillData(snippet))
     .map((snippet) => ({
       id: snippet.id,
       name: snippet.name,
       value: snippet.value,
-      matchNames: snippet.matchNames
+      fieldType: snippet.fieldType,
+      checkboxAction: snippet.checkboxAction,
+      matchNames: snippet.matchNames,
+      pdfData: snippet.pdfData,
+      pdfName: snippet.pdfName
     }));
 
   if (!autofillSnippets.length) {
@@ -822,6 +944,13 @@ async function handleAutofill() {
   } finally {
     elements.autofillButton.disabled = activeView !== 'list';
   }
+}
+
+function hasAutofillData(snippet) {
+  const fieldType = normalizeFieldType(snippet?.fieldType);
+  if (fieldType === 'checkbox') return true;
+  if (fieldType === 'file') return Boolean(snippet?.pdfData);
+  return Boolean(snippet?.value?.trim());
 }
 
 function handleExport() {
@@ -929,6 +1058,19 @@ function closeSettings() {
   elements.settingsMenu.classList.remove('is-open');
   elements.settingsMenu.setAttribute('aria-hidden', 'true');
   elements.settingsButton.setAttribute('aria-expanded', 'false');
+}
+
+async function handleAutoAutofillChange() {
+  const enabled = elements.autoAutofillInput.checked;
+  syncAutoAutofillToggle();
+  await storageSet({ [AUTO_AUTOFILL_KEY]: enabled });
+  showToast(enabled ? 'Auto autofill enabled.' : 'Auto autofill disabled.');
+}
+
+function syncAutoAutofillToggle() {
+  elements.autoAutofillInput
+    .closest('.settings-toggle')
+    ?.setAttribute('aria-checked', String(elements.autoAutofillInput.checked));
 }
 
 function closeUsage() {
@@ -1129,10 +1271,11 @@ function showToast(message, variant = 'success') {
   toast.textContent = message;
   elements.toastRegion.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add('is-visible'));
+  const duration = variant === 'error' ? ERROR_TOAST_DURATION_MS : TOAST_DURATION_MS;
   setTimeout(() => {
     toast.classList.remove('is-visible');
     setTimeout(() => toast.remove(), 180);
-  }, 2600);
+  }, duration);
 }
 
 function handleSelectedPdf(file) {

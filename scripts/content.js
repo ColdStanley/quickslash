@@ -1,26 +1,39 @@
 (() => {
   const SNIPPETS_KEY = 'quickSlashSnippets';
   const GROUPS_KEY = 'quickSlashGroups';
+  const AUTO_AUTOFILL_KEY = 'quickSlashAutoAutofill';
   const TRIGGER = '///';
   const TRIGGER_LENGTH = TRIGGER.length;
+  const FIELD_TYPES = new Set(['text', 'dropdown', 'file', 'checkbox']);
+  const CHECKBOX_ACTIONS = new Set(['check', 'uncheck']);
 
   const state = {
     snippets: [],
     groups: [],
-    context: null
+    context: null,
+    autoAutofillEnabled: false
   };
 
   const panel = createPanel(handlePanelSelection);
+  let autoAutofillTimer = 0;
 
-  loadData();
+  loadData(() => {
+    if (state.autoAutofillEnabled) {
+      scheduleAutoAutofill(250);
+      window.setTimeout(() => scheduleAutoAutofill(0), 1200);
+    }
+  });
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local' && (changes[SNIPPETS_KEY] || changes[GROUPS_KEY])) {
+    if (area === 'local' && (changes[SNIPPETS_KEY] || changes[GROUPS_KEY] || changes[AUTO_AUTOFILL_KEY])) {
       loadData(() => {
-      if (!state.snippets.length) {
-        hidePanel();
-      } else if (panel.isOpen) {
+        if (!state.snippets.length) {
+          hidePanel();
+        } else if (panel.isOpen) {
           panel.render(state.snippets, state.groups);
-      }
+        }
+        if (state.autoAutofillEnabled) {
+          scheduleAutoAutofill(100);
+        }
       });
     }
   });
@@ -40,7 +53,10 @@
   document.addEventListener('selectionchange', handleSelectionChange);
   window.addEventListener('resize', () => hidePanel());
   window.addEventListener('scroll', handleScroll, true);
-  const mutationObserver = new MutationObserver(() => scheduleReposition());
+  const mutationObserver = new MutationObserver(() => {
+    scheduleReposition();
+    if (state.autoAutofillEnabled) scheduleAutoAutofill(500);
+  });
   const observerTarget = document.body || document.documentElement;
   if (observerTarget) {
     mutationObserver.observe(observerTarget, {
@@ -131,10 +147,11 @@
   }
 
   function loadData(callback) {
-    chrome.storage.local.get({ [SNIPPETS_KEY]: [], [GROUPS_KEY]: [] }, (result) => {
+    chrome.storage.local.get({ [SNIPPETS_KEY]: [], [GROUPS_KEY]: [], [AUTO_AUTOFILL_KEY]: false }, (result) => {
       state.groups = normalizeGroups(result[GROUPS_KEY]);
       const validGroupIds = new Set(state.groups.map((group) => group.id));
       state.snippets = normalizeSnippets(result[SNIPPETS_KEY], validGroupIds);
+      state.autoAutofillEnabled = result[AUTO_AUTOFILL_KEY] === true;
       callback?.();
     });
   }
@@ -152,6 +169,8 @@
         id: typeof item.id === 'string' ? item.id : `legacy-${index}`,
         name: item.name,
         value: typeof item.value === 'string' ? item.value : '',
+        fieldType: normalizeFieldType(item.fieldType),
+        checkboxAction: normalizeCheckboxAction(item.checkboxAction),
         groupId: typeof item.groupId === 'string' && validGroupIds.has(item.groupId) ? item.groupId : null,
         favorite: item.favorite === true,
         favoriteOrder: Number.isFinite(item.favoriteOrder) ? item.favoriteOrder : index,
@@ -159,6 +178,14 @@
         pdfData: typeof item.pdfData === 'string' ? item.pdfData : null,
         pdfName: typeof item.pdfName === 'string' ? item.pdfName : null
       }));
+  }
+
+  function normalizeFieldType(value) {
+    return FIELD_TYPES.has(value) ? value : 'text';
+  }
+
+  function normalizeCheckboxAction(value) {
+    return CHECKBOX_ACTIONS.has(value) ? value : 'check';
   }
 
   let repositionFrame = 0;
@@ -378,9 +405,32 @@
     return !element.hasAttribute('disabled');
   }
 
+  function scheduleAutoAutofill(delay = 400) {
+    window.clearTimeout(autoAutofillTimer);
+    autoAutofillTimer = window.setTimeout(runAutoAutofill, delay);
+  }
+
+  function runAutoAutofill() {
+    autoAutofillTimer = 0;
+    if (!state.autoAutofillEnabled || !state.snippets.length) return;
+    const snippetsWithAutofillData = state.snippets.filter((snippet) =>
+      snippet.matchNames?.length && hasAutofillData(snippet)
+    );
+    if (!snippetsWithAutofillData.length) return;
+    autofillFrame(snippetsWithAutofillData);
+  }
+
+  function hasAutofillData(snippet) {
+    const fieldType = normalizeFieldType(snippet?.fieldType);
+    if (fieldType === 'checkbox') return true;
+    if (fieldType === 'file') return Boolean(snippet?.pdfData);
+    return Boolean(snippet?.value?.trim());
+  }
+
   function autofillFrame(rawSnippets) {
     const matchMap = createMatchMap(rawSnippets);
     const fields = collectAutofillFields();
+    const ambiguousFuzzySnippetIds = findAmbiguousFuzzySnippetIds(fields, rawSnippets);
     const result = {
       ok: true,
       scanned: fields.length,
@@ -390,31 +440,37 @@
     };
 
     for (const field of fields) {
-      const snippet = findSnippetForField(field, matchMap, rawSnippets);
+      const snippet = findSnippetForField(field, matchMap, rawSnippets, ambiguousFuzzySnippetIds);
       if (!snippet) continue;
       result.matched += 1;
-      if (!isEmptyField(field)) {
+      const isCheckboxField = field instanceof HTMLInputElement && field.type === 'checkbox';
+      if (!isCheckboxField && !isEmptyField(field)) {
         result.skippedNonEmpty += 1;
         continue;
       }
       const isFileField = field instanceof HTMLInputElement && field.type === 'file';
       const isNativeSelectField = field instanceof HTMLSelectElement;
       const isSelectLikeField = isSelectLikeAutofillField(field);
-      if (isFileField) {
+      const fieldType = normalizeFieldType(snippet.fieldType);
+      if (isCheckboxField && fieldType === 'checkbox') {
+        if (setCheckboxFieldValue(field, snippet.checkboxAction)) {
+          result.filled += 1;
+        }
+      } else if (isFileField && fieldType === 'file') {
         if (snippet.pdfData) {
           if (setFileFieldValue(field, snippet.pdfData, snippet.pdfName || 'document.pdf')) {
             result.filled += 1;
           }
         }
-      } else if (isNativeSelectField) {
+      } else if (isNativeSelectField && fieldType === 'dropdown') {
         if (setSelectFieldValue(field, snippet.value)) {
           result.filled += 1;
         }
-      } else if (isSelectLikeField) {
-        if (setFieldValue(field, snippet.value)) {
+      } else if (isSelectLikeField && fieldType === 'dropdown') {
+        if (setSelectLikeFieldValue(field, snippet.value)) {
           result.filled += 1;
         }
-      } else {
+      } else if (fieldType === 'text') {
         const fillValue = snippet.value || snippet.pdfName || '';
         if (setFieldValue(field, fillValue)) {
           result.filled += 1;
@@ -428,12 +484,13 @@
     const map = new Map();
     if (!Array.isArray(rawSnippets)) return map;
     for (const snippet of rawSnippets) {
-      if (!snippet || typeof snippet.value !== 'string' || !Array.isArray(snippet.matchNames)) continue;
+      if (!snippet || !Array.isArray(snippet.matchNames)) continue;
       for (const matchName of snippet.matchNames) {
         const normalized = normalizeFieldName(matchName);
         if (normalized && !map.has(normalized)) {
-          map.set(normalized, snippet);
+          map.set(normalized, []);
         }
+        if (normalized) map.get(normalized).push(snippet);
       }
     }
     return map;
@@ -445,6 +502,7 @@
       'input[type="file"]',
       'textarea',
       'select',
+      '.fab-SelectToggle',
       '[role="combobox"]',
       '[role="listbox"]',
       '[aria-haspopup="listbox"]',
@@ -473,7 +531,7 @@
       if (element.disabled || (!isFileInput && element.readOnly)) return false;
       const type = (element.type || 'text').toLowerCase();
       const blocked = new Set([
-        'button', 'checkbox', 'color', 'hidden', 'image', 'password',
+        'button', 'color', 'hidden', 'image',
         'radio', 'range', 'reset', 'submit'
       ]);
       return !blocked.has(type);
@@ -504,6 +562,7 @@
 
     if (role === 'combobox' || role === 'listbox') return true;
     if (element instanceof HTMLInputElement && element.hasAttribute('list')) return true;
+    if (element.matches('.fab-SelectToggle')) return true;
     if (ariaHasPopup === 'listbox') return true;
     if (hasListAutocomplete && (hasPopup || hasSelectLikeContainer(element))) return true;
     if (hasPopup && hasSelectLikeContainer(element)) return true;
@@ -522,69 +581,73 @@
       '.select__container',
       '.select-shell',
       '.react-select',
-      '.react-select__control'
+      '.react-select__control',
+      '.fab-Select',
+      '.fab-SelectToggle',
+      '.MuiFormControl-root'
     ].join(',')));
   }
 
-  function findSnippetForField(field, matchMap, allSnippets) {
-    const isFileField = field instanceof HTMLInputElement && field.type === 'file';
-    const isSelectLikeField = isSelectLikeAutofillField(field);
+  function findAmbiguousFuzzySnippetIds(fields, allSnippets) {
+    const counts = new Map();
+    const snippets = Array.isArray(allSnippets) ? allSnippets : [];
+    for (const field of fields) {
+      const targetType = getTargetFieldType(field);
+      if (targetType !== 'dropdown' && targetType !== 'checkbox') continue;
+      const candidates = getFieldNameCandidates(field);
+      for (const snippet of snippets) {
+        if (!snippet?.id || normalizeFieldType(snippet.fieldType) !== targetType || !hasAutofillData(snippet)) continue;
+        if (!Array.isArray(snippet.matchNames)) continue;
+        const matched = candidates.some((candidate) =>
+          snippet.matchNames.some((matchName) => isContiguousTokenMatch(matchName, candidate))
+        );
+        if (matched) counts.set(snippet.id, (counts.get(snippet.id) || 0) + 1);
+      }
+    }
+    return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([id]) => id));
+  }
+
+  function findSnippetForField(field, matchMap, allSnippets, ambiguousFuzzySnippetIds) {
+    const targetType = getTargetFieldType(field);
+    if (!targetType) return null;
     const candidates = getFieldNameCandidates(field);
 
-    // 1. 尝试用 candidates 在 matchMap 做 O(1) 的精准匹配
+    // Exact matching is the default for every type. Fuzzy matching only applies
+    // to Dropdown and Checkbox items below.
     for (const candidate of candidates) {
       const normalized = normalizeFieldName(candidate);
       if (normalized && matchMap.has(normalized)) {
-        return matchMap.get(normalized);
+        const exact = matchMap.get(normalized).filter((snippet) => normalizeFieldType(snippet.fieldType) === targetType);
+        if (exact.length === 1) return exact[0];
       }
     }
 
-    // 2. 针对上传框（input[type="file"]）加入普适性多词元交集匹配，攻克斜杠、连字符、下划线及标点阻抗
-    if (isFileField) {
-      const fileSnippets = state.snippets.filter((snippet) => snippet.pdfData);
+    if (targetType !== 'dropdown' && targetType !== 'checkbox') return null;
 
-      for (const snippet of fileSnippets) {
-        if (!Array.isArray(snippet.matchNames)) continue;
+    const fuzzyMatches = [];
+    const typedSnippets = (Array.isArray(allSnippets) ? allSnippets : [])
+      .filter((snippet) =>
+        normalizeFieldType(snippet.fieldType) === targetType
+        && hasAutofillData(snippet)
+        && !ambiguousFuzzySnippetIds.has(snippet.id)
+      );
 
-        const snippetTerms = snippet.matchNames.flatMap((term) =>
-          normalizeFieldName(term).split(/[\s/,\-_]/).filter(Boolean)
-        );
-
-        if (!snippetTerms.length) continue;
-
-        for (const candidate of candidates) {
-          const normCandidate = normalizeFieldName(candidate);
-          if (!normCandidate) continue;
-
-          const pageTerms = normCandidate.split(/[\s/,\-_]/).filter(Boolean);
-
-          const hasOverlap = pageTerms.some((pTerm) => snippetTerms.includes(pTerm));
-
-          if (hasOverlap) {
-            return snippet;
-          }
-        }
-      }
+    for (const snippet of typedSnippets) {
+      if (!Array.isArray(snippet.matchNames)) continue;
+      const matched = candidates.some((candidate) =>
+        snippet.matchNames.some((matchName) => isContiguousTokenMatch(matchName, candidate))
+      );
+      if (matched) fuzzyMatches.push(snippet);
     }
 
-    // 3. Native selects and ARIA comboboxes are bounded fuzzy: phrase containment
-    // or all meaningful match-name tokens must be present in the page field label.
-    if (isSelectLikeField) {
-      const selectSnippets = (Array.isArray(allSnippets) ? allSnippets : [])
-        .filter((snippet) => typeof snippet.value === 'string' && snippet.value.trim());
+    return fuzzyMatches.length === 1 ? fuzzyMatches[0] : null;
+  }
 
-      for (const snippet of selectSnippets) {
-        if (!Array.isArray(snippet.matchNames)) continue;
-
-        for (const candidate of candidates) {
-          if (snippet.matchNames.some((matchName) => isBoundedFuzzyMatch(matchName, candidate))) {
-            return snippet;
-          }
-        }
-      }
-    }
-
-    return null;
+  function getTargetFieldType(field) {
+    if (field instanceof HTMLInputElement && field.type === 'file') return 'file';
+    if (field instanceof HTMLInputElement && field.type === 'checkbox') return 'checkbox';
+    if (field instanceof HTMLSelectElement || isSelectLikeAutofillField(field)) return 'dropdown';
+    return 'text';
   }
 
   function getFieldNameCandidates(field) {
@@ -600,6 +663,7 @@
     [
       'label', 'name', 'testid', 'testId', 'field', 'fieldName', 'qa', 'cy', 'test'
     ].forEach((key) => addCandidate(candidates, field.dataset?.[key]));
+    getSelectLikeLabelText(field).forEach((text) => addCandidate(candidates, text));
     getNearbyLabelText(field).forEach((text) => addCandidate(candidates, text));
     return candidates;
   }
@@ -624,6 +688,20 @@
   function getAriaLabelledByText(field) {
     const ids = (field.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
     return ids.map((id) => document.getElementById(id)?.innerText || document.getElementById(id)?.textContent || '').join(' ');
+  }
+
+  function getSelectLikeLabelText(field) {
+    const results = [];
+    const container = field.closest('.MuiFormControl-root, .fab-Select, [role="combobox"], [aria-haspopup="true"], [aria-haspopup="listbox"]');
+    if (!container) return results;
+    Array.from(container.querySelectorAll('label, .MuiFormLabel-root, [class*="label" i]'))
+      .slice(0, 6)
+      .forEach((node) => {
+        if (node === field || node.contains(field)) return;
+        const text = node.getAttribute?.('aria-label') || node.innerText || node.textContent;
+        if (text && text.trim().length <= 120) results.push(text);
+      });
+    return results;
   }
 
   function getNearbyLabelText(field) {
@@ -738,6 +816,81 @@
     }
   }
 
+  function setSelectLikeFieldValue(field, value) {
+    if (field instanceof HTMLSelectElement) return setSelectFieldValue(field, value);
+    if (field instanceof HTMLInputElement && field.hasAttribute('list')) return setFieldValue(field, value);
+    if (field.matches('.fab-SelectToggle') || field.getAttribute('aria-haspopup') === 'true') {
+      return setClickableSelectValue(field, value);
+    }
+    if (setNearbyNativeSelectValue(field, value)) return true;
+    return setFieldValue(field, value);
+  }
+
+  function setNearbyNativeSelectValue(field, value) {
+    const container = field.closest('.MuiFormControl-root, .fab-Select, .fabric-1vlsppk-root, div');
+    const select = container?.querySelector?.('select');
+    if (!select || isVisibleElement(select)) return false;
+    return setSelectFieldValue(select, value);
+  }
+
+  function setClickableSelectValue(field, value) {
+    try {
+      field.focus();
+      field.click();
+      let attempts = 0;
+      const chooseWhenReady = () => {
+        const option = findOpenSelectOption(value);
+        if (option) {
+          option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+          option.click();
+          option.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+          return;
+        }
+        attempts += 1;
+        if (attempts < 8) window.setTimeout(chooseWhenReady, 80);
+      };
+      window.setTimeout(chooseWhenReady, 80);
+      return true;
+    } catch (error) {
+      console.warn('QuickSlash clickable select autofill failed:', error);
+      return false;
+    }
+  }
+
+  function findOpenSelectOption(value) {
+    const candidates = Array.from(document.querySelectorAll([
+      '[role="option"]',
+      '[role="menuitem"]',
+      '.fab-SelectOption',
+      '.fab-MenuOption',
+      '.MuiMenuItem-root',
+      'li',
+      'button'
+    ].join(','))).filter((option) => isVisibleElement(option));
+    return getBestOptionElement(candidates, value);
+  }
+
+  function getBestOptionElement(options, value) {
+    const normalizedValue = normalizeFieldName(value);
+    let best = null;
+    let bestScore = 0;
+    for (const option of options) {
+      const optionValue = normalizeFieldName(option.getAttribute('data-value') || option.getAttribute('value'));
+      const optionText = normalizeFieldName(option.innerText || option.textContent);
+      let score = 0;
+      if (optionValue && optionValue === normalizedValue) score = 100;
+      else if (optionText && optionText === normalizedValue) score = 90;
+      else if (isBoundedContainsMatch(normalizedValue, optionValue)) score = 70;
+      else if (isBoundedContainsMatch(normalizedValue, optionText)) score = 65;
+      else if (isTokenSubsetMatch(normalizedValue, `${optionValue} ${optionText}`)) score = 40;
+      if (score > bestScore) {
+        best = option;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
   function setFileFieldValue(field, pdfData, pdfName) {
     try {
       // 1. 从 base64 DataURL 中提取纯数据和 mime 类型
@@ -803,6 +956,21 @@
       return true;
     } catch (error) {
       console.warn('QuickSlash PDF file attachment autofill failed:', error);
+      return false;
+    }
+  }
+
+  function setCheckboxFieldValue(field, action) {
+    try {
+      const nextChecked = normalizeCheckboxAction(action) === 'check';
+      if (field.checked === nextChecked) return true;
+      field.focus();
+      field.checked = nextChecked;
+      field.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      field.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      return true;
+    } catch (error) {
+      console.warn('QuickSlash checkbox autofill failed:', error);
       return false;
     }
   }
@@ -887,8 +1055,15 @@
       .filter((token) => token && !stopWords.has(token));
   }
 
-  function isBoundedFuzzyMatch(matchName, candidate) {
-    return isBoundedContainsMatch(matchName, candidate) || isTokenSubsetMatch(matchName, candidate);
+  function isContiguousTokenMatch(matchName, candidate) {
+    const sourceTokens = normalizeLooseText(matchName).split(' ').filter(Boolean);
+    const targetTokens = normalizeLooseText(candidate).split(' ').filter(Boolean);
+    if (!sourceTokens.length || !targetTokens.length || sourceTokens.length > targetTokens.length) return false;
+    for (let index = 0; index <= targetTokens.length - sourceTokens.length; index += 1) {
+      const windowTokens = targetTokens.slice(index, index + sourceTokens.length);
+      if (sourceTokens.every((token, tokenIndex) => token === windowTokens[tokenIndex])) return true;
+    }
+    return false;
   }
 
   function isBoundedContainsMatch(source, target) {
